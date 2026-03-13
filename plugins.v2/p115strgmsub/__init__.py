@@ -653,7 +653,7 @@ class P115StrgmSub(_PluginBase):
                 username=self._pansou_username,
                 password=self._pansou_password,
                 auth_enabled=self._pansou_auth_enabled,
-                proxy=none
+                proxy = None
             )
 
         if self._nullbr_enabled:
