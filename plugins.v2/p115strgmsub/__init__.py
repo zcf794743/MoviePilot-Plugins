@@ -38,7 +38,7 @@ class P115StrgmSub(_PluginBase):
     """115网盘订阅追更插件"""
 
     # 插件名称
-    plugin_name = "115网盘订阅追更-pansou直连"
+    plugin_name = "115网盘订阅追更"
     # 插件描述
     plugin_desc = "结合MoviePilot订阅功能，自动搜索115网盘资源并转存缺失的电影和剧集。"
     # 插件图标
