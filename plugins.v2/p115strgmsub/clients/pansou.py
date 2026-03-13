@@ -56,10 +56,7 @@ class PanSouClient:
         # API 调用计数器
         self._api_call_count = 0
         # 代理设置（兼容字符串和字典格式）
-        if proxy:
-            self._proxies = proxy if isinstance(proxy, dict) else {"http": proxy, "https": proxy}
-        else:
-            self._proxies = None
+        self._proxies = {"http": None, "https": None}
 
     def _get_token(self) -> Optional[str]:
         """获取或刷新 Token"""
