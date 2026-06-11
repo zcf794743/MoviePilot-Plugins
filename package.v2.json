@@ -4,11 +4,12 @@
     "release": true,
     "description": "结合MoviePilot订阅功能，自动搜索115网盘资源并转存缺失剧集。",
     "labels": "订阅,115网盘",
-    "version": "1.4.2",
+    "version": "1.5.0",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png",
     "author": "mrtian2016",
     "level": 1,
     "history": {
+      "v1.5.0": "1. 适配影巢（HDHive）新版 OpenAPI：应用 Secret + OAuth 用户授权，旧个人 API Key 不再可用；2. 支持 Access Token 自动刷新与持久化；3. 签到改用 OpenAPI 接口；4. 配置页新增 Client ID、应用 Secret、回调地址、授权码字段（接入步骤见配置页说明）；",
       "v1.4.2": "1. 优化PanSou搜索关键词过滤逻辑；",
       "v1.4.1": "1. 更新版本号；",
       "v1.4.0": "1. 优化HDHive用户会话管理;",

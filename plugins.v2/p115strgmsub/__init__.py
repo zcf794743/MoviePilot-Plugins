@@ -22,7 +22,7 @@ from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import EventType, MediaType, NotificationType
 
-from .clients import PanSouClient, P115ClientManager, NullbrClient
+from .clients import PanSouClient, P115ClientManager, NullbrClient, HDHiveOpenAPIClient, HDHiveOpenAPIError
 from .handlers import SearchHandler, SyncHandler, SubscribeHandler, ApiHandler
 from .ui import UIConfig
 from .utils import (
@@ -31,6 +31,7 @@ from .utils import (
     check_hdhive_cookie_valid,
     refresh_hdhive_cookie_with_playwright,
     hdhive_checkin_api,
+    hdhive_checkin_openapi,
     hdhive_checkin_playwright,
 )
 
@@ -47,7 +48,7 @@ class P115StrgmSub(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png"
     # 插件版本
-    plugin_version = "1.4.2"
+    plugin_version = "1.5.0"
     # 插件作者
     plugin_author = "mrtian2016"
     # 作者主页
@@ -91,7 +92,15 @@ class P115StrgmSub(_PluginBase):
     _hdhive_auto_refresh: bool = False
     _hdhive_refresh_before: int = 86400
     _hdhive_query_mode: str = "api"
+    # OpenAPI 应用凭证：应用 Secret 放 X-API-Key（沿用 hdhive_api_key 配置键）
     _hdhive_api_key: str = ""
+    _hdhive_client_id: str = ""
+    _hdhive_redirect_uri: str = ""
+    # OAuth 用户授权（授权码为一次性输入，换取 Token 后自动清空）
+    _hdhive_auth_code: str = ""
+    _hdhive_access_token: str = ""
+    _hdhive_refresh_token: str = ""
+    _hdhive_token_expires_at: float = 0
     _hdhive_auto_unlock: bool = False
     _hdhive_max_unlock_points: int = 50
     _hdhive_max_points_per_sub: int = 20
@@ -579,16 +588,16 @@ class P115StrgmSub(_PluginBase):
                     checkin_type=checkin_type,
                 )
             else:
-                # API 模式：优先使用 API Key，否则使用 Cookie
-                if self._hdhive_api_key:
-                    result = hdhive_checkin_api(
-                        api_key=self._hdhive_api_key,
+                # API 模式：优先使用 OpenAPI（应用 Secret + 用户授权），否则使用 Cookie 走站内接口
+                if self._hdhive_client and self._hdhive_client.is_ready:
+                    result = hdhive_checkin_openapi(
+                        client=self._hdhive_client,
                         checkin_type=checkin_type,
                     )
                 else:
                     cookie = self._check_and_refresh_hdhive_cookie()
                     if not cookie:
-                        logger.warning("HDHive 签到: API 模式无可用 API Key 或 Cookie")
+                        logger.warning("HDHive 签到: API 模式未完成 OpenAPI 授权且无可用 Cookie")
                         return
                     result = hdhive_checkin_api(
                         cookie=cookie,
@@ -665,7 +674,13 @@ class P115StrgmSub(_PluginBase):
 
             self._hdhive_enabled = config.get("hdhive_enabled", False)
             self._hdhive_query_mode = config.get("hdhive_query_mode", "api")
-            self._hdhive_api_key = config.get("hdhive_api_key", "")
+            self._hdhive_api_key = (config.get("hdhive_api_key", "") or "").strip()
+            self._hdhive_client_id = (config.get("hdhive_client_id", "") or "").strip()
+            self._hdhive_redirect_uri = (config.get("hdhive_redirect_uri", "") or "").strip()
+            self._hdhive_auth_code = (config.get("hdhive_auth_code", "") or "").strip()
+            self._hdhive_access_token = config.get("hdhive_access_token", "")
+            self._hdhive_refresh_token = config.get("hdhive_refresh_token", "")
+            self._hdhive_token_expires_at = float(config.get("hdhive_token_expires_at", 0) or 0)
             self._hdhive_auto_unlock = config.get("hdhive_auto_unlock", False)
             self._hdhive_max_unlock_points = int(config.get("hdhive_max_unlock_points", 50) or 50)
             self._hdhive_max_points_per_sub = int(config.get("hdhive_max_points_per_sub", 20) or 20)
@@ -764,21 +779,82 @@ class P115StrgmSub(_PluginBase):
                 self._nullbr_client = NullbrClient(app_id=self._nullbr_appid, api_key=self._nullbr_api_key, proxy=proxy)
                 logger.info("Nullbr 客户端初始化成功")
 
-        # HDHive 客户端初始化（仅 Playwright 模式搜索时动态创建客户端，API 模式直接在 search_hdhive 中请求）
+        # HDHive OpenAPI 客户端初始化（API 模式搜索/解锁/签到共用；Playwright 模式搜索时动态创建浏览器客户端）
+        self._init_hdhive_openapi_client(proxy)
         if self._hdhive_enabled:
-            # Playwright 测试用户名密码，API 测试 api_key
             if self._hdhive_query_mode == "playwright" and (not self._hdhive_username or not self._hdhive_password):
                 logger.warning("HDHive (Playwright 模式) 已启用但未配置用户名和密码，将无法使用 HDHive 查询功能")
-                self._hdhive_client = None
-            elif self._hdhive_query_mode == "api" and not self._hdhive_api_key:
-                logger.warning("HDHive (API 模式) 已启用但未配置 API Key，将无法使用 HDHive 查询功能")
-                self._hdhive_client = None
+            elif self._hdhive_query_mode == "api" and (not self._hdhive_client or not self._hdhive_client.is_ready):
+                logger.warning("HDHive (API 模式) 已启用但未完成 OpenAPI 应用配置和用户授权，将无法使用 HDHive 查询功能")
             else:
                 logger.info(f"HDHive 配置已加载（模式：{self._hdhive_query_mode}）")
-                self._hdhive_client = None
 
         if self._cookies:
             self._p115_manager = P115ClientManager(cookies=self._cookies)
+
+    # ------------------ HDHive OpenAPI ------------------
+
+    def _on_hdhive_token_update(self, tokens: Dict[str, Any]):
+        """Token 刷新后持久化到插件配置"""
+        self._hdhive_access_token = tokens.get("access_token", "")
+        self._hdhive_refresh_token = tokens.get("refresh_token", "")
+        self._hdhive_token_expires_at = float(tokens.get("token_expires_at", 0) or 0)
+        self.__update_config()
+
+    def _init_hdhive_openapi_client(self, proxy=None):
+        """
+        初始化 HDHive OpenAPI 客户端，并处理一次性授权码换 Token
+
+        新版接入模型：
+        1. 在 HDHive 创建 OpenAPI 应用，审核通过后获得 client_id 和应用 Secret
+        2. 配置 client_id、应用 Secret、回调地址后保存，从日志中复制授权链接到浏览器完成授权
+        3. 将回调地址中的 code 参数填入"授权码"并保存，插件自动换取用户 Token
+        """
+        self._hdhive_client = None
+        if not self._hdhive_api_key:
+            return
+
+        client = HDHiveOpenAPIClient(
+            app_secret=self._hdhive_api_key,
+            client_id=self._hdhive_client_id,
+            access_token=self._hdhive_access_token,
+            refresh_token=self._hdhive_refresh_token,
+            token_expires_at=self._hdhive_token_expires_at,
+            proxy=proxy,
+            on_token_update=self._on_hdhive_token_update,
+        )
+        self._hdhive_client = client
+
+        # 一次性授权码换取用户 Token
+        if self._hdhive_auth_code:
+            auth_code = self._hdhive_auth_code
+            self._hdhive_auth_code = ""
+            if not self._hdhive_redirect_uri:
+                logger.error("HDHive OpenAPI: 已填写授权码但缺少回调地址（必须与发起授权时一致），无法换取 Token")
+                self.__update_config()
+            else:
+                try:
+                    data = client.exchange_code(auth_code, self._hdhive_redirect_uri)
+                    scopes = data.get("scope") or " ".join(data.get("scopes") or [])
+                    logger.info(f"HDHive OpenAPI: 用户授权成功，已获取 Access Token（scope: {scopes}）")
+                    self.__update_config()
+                except HDHiveOpenAPIError as e:
+                    logger.error(f"HDHive OpenAPI: 授权码换取 Token 失败: [{e.code}] {e.message} {e.description}")
+                    self.__update_config()
+                except Exception as e:
+                    logger.error(f"HDHive OpenAPI: 授权码换取 Token 异常: {e}")
+                    self.__update_config()
+
+        # 未完成授权时，打印授权链接引导用户操作
+        if not client.is_ready:
+            if self._hdhive_client_id and self._hdhive_redirect_uri:
+                authorize_url = client.build_authorize_url(self._hdhive_redirect_uri)
+                logger.warning(
+                    f"HDHive OpenAPI: 尚未完成用户授权，请在浏览器打开以下链接完成授权，"
+                    f"然后将回调地址中的 code 参数填入插件配置的「授权码」并保存：\n{authorize_url}"
+                )
+            else:
+                logger.warning("HDHive OpenAPI: 请先在 HDHive 申请 OpenAPI 应用，并在插件中配置 Client ID、应用 Secret 和回调地址")
 
     def _init_subscribe_handler(self):
         self._subscribe_handler = SubscribeHandler(
@@ -798,7 +874,6 @@ class P115StrgmSub(_PluginBase):
             nullbr_enabled=self._nullbr_enabled,
             hdhive_enabled=self._hdhive_enabled,
             hdhive_query_mode=self._hdhive_query_mode,
-            hdhive_api_key=self._hdhive_api_key,
             hdhive_auto_unlock=self._hdhive_auto_unlock,
             hdhive_max_unlock_points=self._hdhive_max_unlock_points,
             hdhive_max_points_per_sub=self._hdhive_max_points_per_sub,
@@ -861,6 +936,12 @@ class P115StrgmSub(_PluginBase):
             "hdhive_enabled": self._hdhive_enabled,
             "hdhive_query_mode": self._hdhive_query_mode,
             "hdhive_api_key": self._hdhive_api_key,
+            "hdhive_client_id": self._hdhive_client_id,
+            "hdhive_redirect_uri": self._hdhive_redirect_uri,
+            "hdhive_auth_code": self._hdhive_auth_code,
+            "hdhive_access_token": self._hdhive_access_token,
+            "hdhive_refresh_token": self._hdhive_refresh_token,
+            "hdhive_token_expires_at": self._hdhive_token_expires_at,
             "hdhive_auto_unlock": self._hdhive_auto_unlock,
             "hdhive_max_unlock_points": self._hdhive_max_unlock_points,
             "hdhive_max_points_per_sub": self._hdhive_max_points_per_sub,

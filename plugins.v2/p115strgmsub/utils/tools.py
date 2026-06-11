@@ -450,17 +450,52 @@ def refresh_hdhive_cookie_with_playwright(
         return None
 
 
+def hdhive_checkin_openapi(client, checkin_type: str = "normal") -> Dict[str, Any]:
+    """
+    通过 OpenAPI 执行 HDHive 签到（应用 Secret + 用户 Access Token）
+
+    :param client: HDHiveOpenAPIClient 实例
+    :param checkin_type: 签到类型 "normal"(每日签到) 或 "gamble"(赌狗签到)
+    :return: {"success": bool, "message": str, "checkin_type": str, "points": int|None}
+    """
+    from ..clients import HDHiveOpenAPIError
+
+    result = {"success": False, "message": "", "checkin_type": checkin_type, "points": None}
+
+    if not client or not client.is_ready:
+        result["message"] = "未配置应用 Secret 或未完成用户授权"
+        return result
+
+    try:
+        resp = client.checkin(is_gambler=checkin_type == "gamble")
+        data = resp.get("data") or {}
+        message = data.get("message") or resp.get("message") or "未知"
+        # 当天已签到时接口仍返回 success=true、checked_in=false，视为签到成功
+        result["success"] = bool(resp.get("success"))
+        result["message"] = message
+        points = data.get("points")
+        if points:
+            result["points"] = int(points)
+        return result
+    except HDHiveOpenAPIError as e:
+        logger.error(f"HDHive OpenAPI 签到失败: [{e.code}] {e.message} {e.description}")
+        result["message"] = e.description or e.message or e.code
+        return result
+    except Exception as e:
+        logger.error(f"HDHive OpenAPI 签到异常: {e}")
+        result["message"] = f"签到异常: {e}"
+        return result
+
+
 def hdhive_checkin_api(
     cookie: str = "",
-    api_key: str = "",
     checkin_type: str = "normal",
     base_url: str = "https://hdhive.com",
 ) -> Dict[str, Any]:
     """
-    通过 API 方式执行 HDHive 签到
+    通过站内 API（Cookie 登录态）执行 HDHive 签到
 
     :param cookie: Cookie 字符串 (格式: "token=xxx; csrf_access_token=xxx")
-    :param api_key: HDHive API Key
     :param checkin_type: 签到类型 "normal"(每日签到) 或 "gamble"(赌狗签到)
     :param base_url: HDHive 站点地址
     :return: {"success": bool, "message": str, "checkin_type": str, "points": int|None}
@@ -470,8 +505,8 @@ def hdhive_checkin_api(
 
     result = {"success": False, "message": "", "checkin_type": checkin_type, "points": None}
 
-    if not cookie and not api_key:
-        result["message"] = "未配置 Cookie 或 API Key"
+    if not cookie:
+        result["message"] = "未配置 Cookie"
         return result
 
     proxy = settings.PROXY
@@ -482,41 +517,35 @@ def hdhive_checkin_api(
     }
     cookies = {}
 
-    if api_key:
-        headers['X-API-Key'] = api_key
-        headers['Referer'] = f"{base_url}/"
-        checkin_url = f"{base_url}/api/open/checkin"
-        json_data = {"is_gambler": checkin_type == "gamble"}
-    else:
-        checkin_url = f"{base_url}/api/customer/user/checkin"
-        json_data = None
-        # 解析 cookie
-        for item in cookie.split(';'):
-            if '=' in item:
-                k, v = item.strip().split('=', 1)
-                cookies[k] = v
+    checkin_url = f"{base_url}/api/customer/user/checkin"
+    json_data = None
+    # 解析 cookie
+    for item in cookie.split(';'):
+        if '=' in item:
+            k, v = item.strip().split('=', 1)
+            cookies[k] = v
 
-        token = cookies.get('token')
-        csrf_token = cookies.get('csrf_access_token')
+    token = cookies.get('token')
+    csrf_token = cookies.get('csrf_access_token')
 
-        if not token:
-            result["message"] = "Cookie 中缺少 token"
-            return result
+    if not token:
+        result["message"] = "Cookie 中缺少 token"
+        return result
 
-        # 解析 user_id 用于 Referer
-        user_id = None
-        try:
-            payload = decode_jwt_payload(token)
-            if payload:
-                user_id = payload.get('sub')
-        except Exception:
-            pass
+    # 解析 user_id 用于 Referer
+    user_id = None
+    try:
+        payload = decode_jwt_payload(token)
+        if payload:
+            user_id = payload.get('sub')
+    except Exception:
+        pass
 
-        referer = f"{base_url}/user/{user_id}" if user_id else f"{base_url}/"
-        headers['Referer'] = referer
-        headers['Authorization'] = f'Bearer {token}'
-        if csrf_token:
-            headers['x-csrf-token'] = csrf_token
+    referer = f"{base_url}/user/{user_id}" if user_id else f"{base_url}/"
+    headers['Referer'] = referer
+    headers['Authorization'] = f'Bearer {token}'
+    if csrf_token:
+        headers['x-csrf-token'] = csrf_token
 
     try:
         resp = requests.post(

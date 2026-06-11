@@ -263,7 +263,21 @@ class UIConfig:
                         'content': [{
                             'component': 'VCol',
                             'props': {'cols': 12},
-                            'content': [{'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'text': 'HDHive资源查询：基于TMDB ID查询115网盘资源。API模式使用API Key查询；Playwright模式使用浏览器模拟获取分享链接（需安装 playwright 和 chromium）'}}]
+                            'content': [{'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'text': 'HDHive资源查询：基于TMDB ID查询115网盘资源。API模式使用OpenAPI应用查询；Playwright模式使用浏览器模拟获取分享链接（需安装 playwright 和 chromium）'}}]
+                        }]
+                    },
+                    # HDHive OpenAPI 接入说明
+                    {
+                        'component': 'VRow',
+                        'content': [{
+                            'component': 'VCol',
+                            'props': {'cols': 12},
+                            'content': [{'component': 'VAlert', 'props': {'type': 'warning', 'variant': 'tonal',
+                                'text': 'HDHive 已升级为 OpenAPI 应用 + OAuth 用户授权，旧个人 API Key 已失效。接入步骤：'
+                                        '① 在影巢申请 OpenAPI 应用（回调模式选 redirect，scope 勾选 query/unlock/write），获得 Client ID 和应用 Secret；'
+                                        '② 在下方填写 Client ID、应用 Secret、回调地址（须与应用配置一致）并保存；'
+                                        '③ 打开插件日志中输出的授权链接，登录影巢确认授权；'
+                                        '④ 授权后浏览器跳转到回调地址，复制地址栏中 code= 后面的授权码填入下方「授权码」并保存，插件会自动换取并维护用户 Token。'}}]
                         }]
                     },
                     # HDHive 配置
@@ -276,7 +290,20 @@ class UIConfig:
                              'content': [{'component': 'VSelect', 'props': {'model': 'hdhive_query_mode', 'label': '查询模式',
                                  'items': [{'title': 'API 模式', 'value': 'api'}, {'title': 'Playwright 模式', 'value': 'playwright'}]}}]},
                             {'component': 'VCol', 'props': {'cols': 12, 'md': 4},
-                             'content': [{'component': 'VTextField', 'props': {"clearable": True, 'model': 'hdhive_api_key', 'label': 'HDHive API Key', 'type': 'password', 'placeholder': 'API 模式下需要'}}]}
+                             'content': [{'component': 'VTextField', 'props': {"clearable": True, 'model': 'hdhive_client_id', 'label': 'HDHive Client ID', 'placeholder': 'OpenAPI 应用公开 ID（app_xxx）'}}]}
+                        ]
+                    },
+                    # HDHive OpenAPI 凭证
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {'component': 'VCol', 'props': {'cols': 12, 'md': 4},
+                             'content': [{'component': 'VTextField', 'props': {"clearable": True, 'model': 'hdhive_api_key', 'label': 'HDHive 应用 Secret', 'type': 'password', 'placeholder': 'OpenAPI 应用 Secret（X-API-Key）'}}]},
+                            {'component': 'VCol', 'props': {'cols': 12, 'md': 4},
+                             'content': [{'component': 'VTextField', 'props': {"clearable": True, 'model': 'hdhive_redirect_uri', 'label': '回调地址', 'placeholder': '须与 OpenAPI 应用配置完全一致'}}]},
+                            {'component': 'VCol', 'props': {'cols': 12, 'md': 4},
+                             'content': [{'component': 'VTextField', 'props': {"clearable": True, 'model': 'hdhive_auth_code', 'label': '授权码', 'placeholder': '授权后回调地址中的 code 参数，保存后自动换取 Token',
+                                 'hint': '一次性使用，换取 Token 成功后自动清空', 'persistent-hint': True}}]}
                         ]
                     },
                     # HDHive 账号密码配置
@@ -300,7 +327,7 @@ class UIConfig:
                             {'component': 'VCol', 'props': {'cols': 12, 'md': 4},
                              'content': [{'component': 'VSelect', 'props': {'model': 'hdhive_checkin_mode', 'label': '签到模式',
                                  'items': [{'title': 'API 模式', 'value': 'api'}, {'title': 'Playwright 模式', 'value': 'playwright'}],
-                                 'hint': 'API需Cookie，Playwright需账号密码', 'persistent-hint': True}}]}
+                                 'hint': 'API需完成OpenAPI授权（或Cookie），Playwright需账号密码', 'persistent-hint': True}}]}
                         ]
                     },
                     # HDHive 积分配置
@@ -378,6 +405,12 @@ class UIConfig:
             "hdhive_enabled": False,
             "hdhive_query_mode": "api",
             "hdhive_api_key": "",
+            "hdhive_client_id": "",
+            "hdhive_redirect_uri": "",
+            "hdhive_auth_code": "",
+            "hdhive_access_token": "",
+            "hdhive_refresh_token": "",
+            "hdhive_token_expires_at": 0,
             "hdhive_auto_unlock": False,
             "hdhive_max_unlock_points": 50,
             "hdhive_max_points_per_sub": 20,

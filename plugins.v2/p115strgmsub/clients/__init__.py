@@ -5,9 +5,12 @@
 from .p115 import P115ClientManager
 from .pansou import PanSouClient
 from .nullbr import NullbrClient
+from .hdhive import HDHiveOpenAPIClient, HDHiveOpenAPIError
 
 __all__ = [
     "P115ClientManager",
     "PanSouClient",
-    "NullbrClient"
+    "NullbrClient",
+    "HDHiveOpenAPIClient",
+    "HDHiveOpenAPIError"
 ]

@@ -27,7 +27,6 @@ class SearchHandler:
         hdhive_password: str = "",
         hdhive_cookie: str = "",
         hdhive_query_mode: str = "api",
-        hdhive_api_key: str = "",
         hdhive_auto_unlock: bool = False,
         hdhive_max_unlock_points: int = 50,
         hdhive_max_points_per_sub: int = 20,
@@ -39,7 +38,7 @@ class SearchHandler:
 
         :param pansou_client: PanSou 客户端实例
         :param nullbr_client: Nullbr 客户端实例
-        :param hdhive_client: HDHive 客户端实例（保留兼容，实际 Playwright 模式不使用）
+        :param hdhive_client: HDHive OpenAPI 客户端实例（API 模式使用）
         :param pansou_enabled: 是否启用 PanSou
         :param nullbr_enabled: 是否启用 Nullbr
         :param hdhive_enabled: 是否启用 HDHive
@@ -47,7 +46,6 @@ class SearchHandler:
         :param hdhive_password: HDHive 密码
         :param hdhive_cookie: HDHive Cookie
         :param hdhive_query_mode: HDHive 查询模式
-        :param hdhive_api_key: HDHive API Key
         :param hdhive_auto_unlock: 是否自动解锁 HDHive 资源
         :param only_115: 是否只搜索115网盘资源
         :param pansou_channels: PanSou 搜索频道
@@ -62,7 +60,6 @@ class SearchHandler:
         self._hdhive_password = hdhive_password
         self._hdhive_cookie = hdhive_cookie
         self._hdhive_query_mode = hdhive_query_mode
-        self._hdhive_api_key = hdhive_api_key
         self._hdhive_auto_unlock = hdhive_auto_unlock
         self._hdhive_max_unlock_points = hdhive_max_unlock_points
         self._hdhive_max_points_per_sub = hdhive_max_points_per_sub
@@ -90,7 +87,7 @@ class SearchHandler:
         if self._hdhive_enabled:
             if self._hdhive_query_mode == "playwright" and self._hdhive_username and self._hdhive_password:
                 sources.append("hdhive")
-            elif self._hdhive_query_mode == "api" and self._hdhive_api_key:
+            elif self._hdhive_query_mode == "api" and self._hdhive_client and self._hdhive_client.is_ready:
                 sources.append("hdhive")
 
         # PanSou
@@ -388,35 +385,24 @@ class SearchHandler:
     def _search_hdhive_api(self, mediainfo: MediaInfo, hdhive_media_type: str) -> List[Dict]:
         """
         使用 API 模式查询 HDHive 资源
-        需要有效的 API Key
+        需要应用 Secret + 用户授权（OpenAPI 客户端）
         """
-        if not self._hdhive_api_key:
-            logger.warning("HDHive API 模式需要有效的 API Key")
+        from ..clients import HDHiveOpenAPIError
+
+        if not self._hdhive_client or not self._hdhive_client.is_ready:
+            logger.warning("HDHive API 模式需要配置应用 Secret 并完成用户授权")
             return []
 
         try:
-            import requests
             logger.info(f"使用 HDHive (API) 查询: {mediainfo.title} (TMDB ID: {mediainfo.tmdb_id})")
 
-            headers = {
-                "X-API-Key": self._hdhive_api_key,
-                "Content-Type": "application/json"
-            }
-
             # 1. 获取资源列表
-            url = f"https://hdhive.com/api/open/resources/{hdhive_media_type}/{mediainfo.tmdb_id}"
-            proxy = settings.PROXY
-            proxies = proxy if isinstance(proxy, dict) else {"http": proxy, "https": proxy} if proxy else None
-
-            res = requests.get(url, headers=headers, proxies=proxies, timeout=15)
-            logger.info(f"HDHive (API) GET {url} 返回状态: {res.status_code}")
-            logger.info(f"HDHive (API) 响应内容: {res.text}")
-            
-            if res.status_code != 200:
-                logger.info(f"HDHive (API) 获取资源失败, status: {res.status_code}")
+            try:
+                data = self._hdhive_client.query_resources(hdhive_media_type, mediainfo.tmdb_id)
+            except HDHiveOpenAPIError as e:
+                logger.error(f"HDHive (API) 获取资源失败: [{e.code}] {e.message} {e.description}")
                 return []
 
-            data = res.json()
             if not data.get("success") or not data.get("data"):
                 logger.info(f"HDHive (API) 未找到资源: {mediainfo.title}, 返回数据: {data}")
                 return []
@@ -464,28 +450,24 @@ class SearchHandler:
 
                     # 如果免费，则直接解锁并获取链接
                     if is_free:
-                        unlock_url = "https://hdhive.com/api/open/resources/unlock"
                         logger.info(f"HDHive (API) 尝试免费解锁资源: {slug}")
-                        unlock_res = requests.post(unlock_url, json={"slug": slug}, headers=headers, proxies=proxies, timeout=15)
-                        
-                        logger.info(f"HDHive (API) 解锁 {slug} 返回状态: {unlock_res.status_code}, 内容: {unlock_res.text}")
-                        
-                        if unlock_res.status_code == 200:
-                            unlock_data = unlock_res.json()
-                            if unlock_data.get("success") and unlock_data.get("data"):
-                                share_url = unlock_data["data"].get("full_url", "")
-                                logger.info(f"HDHive (API) 解锁数据: {unlock_data}")
-                                logger.info(f"HDHive (API) 成功解锁免费资源, 分享链接: {share_url}")
-                                free_115_resources.append({
-                                    "url": share_url,
-                                    "title": resource.get("title", ""),
-                                    "update_time": resource.get("created_at", ""),
-                                    "is_official": bool(resource.get("is_official"))
-                                })
-                            else:
-                                logger.error(f"HDHive (API) 解锁失败，返回数据异常或非成功: {unlock_data}")
+                        try:
+                            unlock_data = self._hdhive_client.unlock_resource(slug)
+                        except HDHiveOpenAPIError as e:
+                            logger.error(f"HDHive (API) 解锁请求失败: [{e.code}] {e.message} {e.description}")
+                            continue
+
+                        if unlock_data.get("success") and unlock_data.get("data"):
+                            share_url = unlock_data["data"].get("full_url", "")
+                            logger.info(f"HDHive (API) 成功解锁免费资源, 分享链接: {share_url}")
+                            free_115_resources.append({
+                                "url": share_url,
+                                "title": resource.get("title", ""),
+                                "update_time": resource.get("created_at", ""),
+                                "is_official": bool(resource.get("is_official"))
+                            })
                         else:
-                            logger.error(f"HDHive (API) 解锁请求失败，状态码: {unlock_res.status_code}")
+                            logger.error(f"HDHive (API) 解锁失败，返回数据异常或非成功: {unlock_data}")
                     else:
                         # 对于非免费资源，延迟解锁：返回标记并携带 slug，后续供 SyncHandler 按需调用 unlock
                         logger.info(f"HDHive (API) 收费资源将其加入列表延迟解锁: {slug}")
@@ -582,55 +564,49 @@ class SearchHandler:
         :param unlock_points: 本次需消耗的积分
         :return: 成功返回真实的 url，失败返回 None
         """
-        if not self._hdhive_api_key:
-            logger.warning("HDHive API 模式需要有效的 API Key 进行解锁")
+        from ..clients import HDHiveOpenAPIError
+
+        if not self._hdhive_client or not self._hdhive_client.is_ready:
+            logger.warning("HDHive API 模式需要配置应用 Secret 并完成用户授权才能解锁")
             return None
 
         # 双层检查积分预算
         if (self._current_spent_points + unlock_points) > self._hdhive_max_unlock_points:
             logger.warning(f"HDHive (API) 全局积分预算不足！全局已花费 {self._current_spent_points}，需 {unlock_points}，全局总预算 {self._hdhive_max_unlock_points}")
             return None
-            
+
         if (self._sub_spent_points + unlock_points) > self._hdhive_max_points_per_sub:
             logger.warning(f"HDHive (API) 单订阅积分预算不足！本订阅已花费 {self._sub_spent_points}，需 {unlock_points}，单订阅预算 {self._hdhive_max_points_per_sub}")
             return None
 
         try:
-            import requests
             import time
-            headers = {
-                "X-API-Key": self._hdhive_api_key,
-                "Content-Type": "application/json"
-            }
-            proxy = settings.PROXY
-            proxies = proxy if isinstance(proxy, dict) else {"http": proxy, "https": proxy} if proxy else None
 
-            unlock_url = "https://hdhive.com/api/open/resources/unlock"
             logger.info(f"HDHive (API) 触发后备按需积分解锁资源: {slug}")
-            unlock_res = requests.post(unlock_url, json={"slug": slug}, headers=headers, proxies=proxies, timeout=15)
-            
-            # 为防风控拦截，解锁一个暂停 2 秒
-            time.sleep(2)
+            try:
+                unlock_data = self._hdhive_client.unlock_resource(slug)
+            except HDHiveOpenAPIError as e:
+                logger.error(f"HDHive (API) 解锁请求失败: [{e.code}] {e.message} {e.description}")
+                return None
+            finally:
+                # 为防风控拦截，解锁一个暂停 2 秒
+                time.sleep(2)
 
-            if unlock_res.status_code == 200:
-                unlock_data = unlock_res.json()
-                if unlock_data.get("success") and unlock_data.get("data"):
-                    share_url = unlock_data["data"].get("full_url", "")
-                    self._current_spent_points += unlock_points
-                    self._sub_spent_points += unlock_points
-                    # 持久化保存该订阅的累计花费
-                    if self._current_sub_key:
-                        history = self._load_sub_points_history()
-                        history[self._current_sub_key] = self._sub_spent_points
-                        self._save_sub_points_history(history)
-                    logger.info(f"HDHive (API) 成功扣除 {unlock_points} 积分解锁, 获得新分享链接: {share_url}。全局预算剩余: {self._hdhive_max_unlock_points - self._current_spent_points}, 当前订阅预算剩余: {self._hdhive_max_points_per_sub - self._sub_spent_points}")
-                    return share_url
-                else:
-                    logger.error(f"HDHive (API) 解锁失败，返回数据: {unlock_data}")
+            if unlock_data.get("success") and unlock_data.get("data"):
+                share_url = unlock_data["data"].get("full_url", "")
+                self._current_spent_points += unlock_points
+                self._sub_spent_points += unlock_points
+                # 持久化保存该订阅的累计花费
+                if self._current_sub_key:
+                    history = self._load_sub_points_history()
+                    history[self._current_sub_key] = self._sub_spent_points
+                    self._save_sub_points_history(history)
+                logger.info(f"HDHive (API) 成功扣除 {unlock_points} 积分解锁, 获得新分享链接: {share_url}。全局预算剩余: {self._hdhive_max_unlock_points - self._current_spent_points}, 当前订阅预算剩余: {self._hdhive_max_points_per_sub - self._sub_spent_points}")
+                return share_url
             else:
-                logger.error(f"HDHive (API) 解锁请求失败，状态码: {unlock_res.status_code}")
-                
+                logger.error(f"HDHive (API) 解锁失败，返回数据: {unlock_data}")
+
         except Exception as e:
             logger.error(f"HDHive (API) 解锁异常: {e}")
-            
+
         return None
