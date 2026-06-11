@@ -274,7 +274,7 @@ class UIConfig:
                             'props': {'cols': 12},
                             'content': [{'component': 'VAlert', 'props': {'type': 'warning', 'variant': 'tonal',
                                 'text': 'HDHive 已升级为 OpenAPI 应用 + OAuth 用户授权，旧个人 API Key 已失效。接入步骤：'
-                                        '① 在影巢申请 OpenAPI 应用（回调模式选 redirect，scope 勾选 query/unlock/write），获得 Client ID 和应用 Secret；'
+                                        '① 在影巢申请 OpenAPI 应用（回调模式选 redirect，scope 勾选 query/unlock），获得 Client ID 和应用 Secret；'
                                         '② 在下方填写 Client ID、应用 Secret、回调地址（须与应用配置一致）并保存；'
                                         '③ 打开插件日志中输出的授权链接，登录影巢确认授权；'
                                         '④ 授权后浏览器跳转到回调地址，复制地址栏中 code= 后面的授权码填入下方「授权码」并保存，插件会自动换取并维护用户 Token。'}}]
@@ -314,20 +314,6 @@ class UIConfig:
                              'content': [{'component': 'VTextField', 'props': {'model': 'hdhive_username', 'label': 'HDHive 用户名', 'placeholder': 'Playwright 模式下需要'}}]},
                             {'component': 'VCol', 'props': {'cols': 12, 'md': 5},
                              'content': [{'component': 'VTextField', 'props': {"clearable": True, 'model': 'hdhive_password', 'label': 'HDHive 密码', 'type': 'password', 'placeholder': 'Playwright 模式下需要'}}]}
-                        ]
-                    },
-                    # HDHive 签到配置
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {'component': 'VCol', 'props': {'cols': 6, 'md': 4},
-                             'content': [{'component': 'VSwitch', 'props': {'model': 'hdhive_checkin_enabled', 'label': '每日自动签到', 'hint': '每天随机6~10点自动签到获取积分', 'persistent-hint': True}}]},
-                            {'component': 'VCol', 'props': {'cols': 6, 'md': 4},
-                             'content': [{'component': 'VSwitch', 'props': {'model': 'hdhive_checkin_gambler', 'label': '赌狗模式签到', 'hint': '高风险高回报（-3~+30积分）', 'persistent-hint': True}}]},
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 4},
-                             'content': [{'component': 'VSelect', 'props': {'model': 'hdhive_checkin_mode', 'label': '签到模式',
-                                 'items': [{'title': 'API 模式', 'value': 'api'}, {'title': 'Playwright 模式', 'value': 'playwright'}],
-                                 'hint': 'API需完成OpenAPI授权（或Cookie），Playwright需账号密码', 'persistent-hint': True}}]}
                         ]
                     },
                     # HDHive 积分配置
@@ -414,9 +400,6 @@ class UIConfig:
             "hdhive_auto_unlock": False,
             "hdhive_max_unlock_points": 50,
             "hdhive_max_points_per_sub": 20,
-            "hdhive_checkin_enabled": False,
-            "hdhive_checkin_gambler": False,
-            "hdhive_checkin_mode": "api",
             "hdhive_username": "",
             "hdhive_password": "",
             "hdhive_cookie": "",

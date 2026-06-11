@@ -31,11 +31,11 @@ class HDHiveOpenAPIClient:
 
     认证模型:
     - 应用 Secret: 所有 /api/open/* 和 OAuth 接口都放在 X-API-Key 请求头
-    - 用户 Access Token: 业务接口（资源查询/解锁/签到等）附加 Authorization: Bearer
+    - 用户 Access Token: 业务接口（资源查询/解锁等）附加 Authorization: Bearer
     - Access Token 过期时自动用 Refresh Token 刷新，并通过回调持久化新 Token
     """
 
-    DEFAULT_SCOPE = "query unlock write"
+    DEFAULT_SCOPE = "query unlock"
 
     def __init__(
         self,
@@ -157,11 +157,6 @@ class HDHiveOpenAPIClient:
     def get_me(self) -> Dict[str, Any]:
         """获取当前授权用户基础信息"""
         return self._request("GET", "/api/open/me")
-
-    def checkin(self, is_gambler: bool = False) -> Dict[str, Any]:
-        """代表当前授权用户每日签到"""
-        body = {"is_gambler": True} if is_gambler else {}
-        return self._request("POST", "/api/open/checkin", body=body)
 
     def query_resources(self, media_type: str, tmdb_id: Any) -> Dict[str, Any]:
         """
